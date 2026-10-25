@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 namespace esphome {
@@ -25,6 +26,14 @@ namespace esphome {
             // Select the appropriate conversion table based on mode
             const std::vector<std::pair<float, float>>& localTable = getActiveTable();
             if (localTable.empty()) {
+                return c;
+            }
+
+            // Outside the table's range (with a quarter-degree of slack so the edge
+            // rows still map), report the real value. The table only covers the
+            // range where Mitsubishi's rounding differs from a plain conversion; the
+            // unit's own limits are enforced by calculate_temperature_setting().
+            if (c < localTable.front().second - 0.25f || c > localTable.back().second + 0.25f) {
                 return c;
             }
 
@@ -63,6 +72,15 @@ namespace esphome {
             }
 
             float fahrenheitInput = (c * 1.8f) + 32.0f;
+
+            // Outside the table's range (with half a degree F of slack so the edge
+            // rows still map), convert linearly at the unit's 0.5°C resolution
+            // instead of clamping to the table's ends. Units that accept setpoints
+            // below 16°C (e.g. 10°C heat) need this; units that don't are clamped
+            // by calculate_temperature_setting().
+            if (fahrenheitInput < localTable.front().first - 0.5f || fahrenheitInput > localTable.back().first + 0.5f) {
+                return std::round(c * 2.0f) / 2.0f;
+            }
 
             // Due to vagaries of floating point math across architectures, we can't
             // just look up `c` in the map -- we're very unlikely to find a matching

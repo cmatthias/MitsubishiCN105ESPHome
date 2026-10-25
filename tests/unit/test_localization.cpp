@@ -118,3 +118,83 @@ TEST(FahrenheitSupportTest, StandardTable_MidpointResolvesDeterministically) {
     EXPECT_NEAR(again, once, 1e-4f);
     (void)twice;
 }
+
+// ========================================================
+// Outside the table's range: setpoints are converted linearly at 0.5°C
+// resolution instead of being clamped to the table's ends. Units that
+// accept setpoints below 16°C (10°C heat) rely on this; units that don't
+// are clamped later by calculate_temperature_setting().
+// ========================================================
+
+static void expectBelowTableLinear(FahrenheitMode mode) {
+    FahrenheitSupport fs;
+    fs.setUseFahrenheitSupportMode(mode);
+    EXPECT_FLOAT_EQ(fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(50)), 10.0f);
+    EXPECT_FLOAT_EQ(fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(55)), 13.0f);
+    EXPECT_FLOAT_EQ(fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(58)), 14.5f);
+    EXPECT_FLOAT_EQ(fs.normalizeHeatpumpTemperatureToUiTemperature(10.0f), 10.0f);
+    EXPECT_FLOAT_EQ(fs.normalizeHeatpumpTemperatureToUiTemperature(13.0f), 13.0f);
+}
+
+TEST(FahrenheitSupportTest, StandardTable_BelowTableIsLinear) {
+    expectBelowTableLinear(FahrenheitMode::STANDARD);
+}
+
+TEST(FahrenheitSupportTest, AltTable_BelowTableIsLinear) {
+    expectBelowTableLinear(FahrenheitMode::ALT);
+}
+
+TEST(FahrenheitSupportTest, MszA24naTable_BelowTableIsLinear) {
+    expectBelowTableLinear(FahrenheitMode::MSZ_A24NA);
+}
+
+// Every whole-Fahrenheit value below the table survives a storage cycle:
+// the UI value read back shows as the same whole °F, and further cycles
+// are a fixed point.
+static void expectBelowTableCycleStable(FahrenheitMode mode, int first_row_f) {
+    FahrenheitSupport fs;
+    fs.setUseFahrenheitSupportMode(mode);
+    for (int f = 45; f < first_row_f; ++f) {
+        const float hp = fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(f));
+        const float u1 = fs.normalizeHeatpumpTemperatureToUiTemperature(hp);
+        EXPECT_EQ(static_cast<int>(std::lround(u1 * 1.8f + 32.0f)), f) << "displayed value drifted for " << f << "F";
+
+        const float hp2 = fs.normalizeUiTemperatureToHeatpumpTemperature(u1);
+        EXPECT_FLOAT_EQ(hp2, hp) << "second cycle drifted for " << f << "F";
+    }
+}
+
+TEST(FahrenheitSupportTest, StandardTable_BelowTableCycleStable) {
+    expectBelowTableCycleStable(FahrenheitMode::STANDARD, 61);
+}
+
+TEST(FahrenheitSupportTest, AltTable_BelowTableCycleStable) {
+    expectBelowTableCycleStable(FahrenheitMode::ALT, 61);
+}
+
+TEST(FahrenheitSupportTest, MszA24naTable_BelowTableCycleStable) {
+    expectBelowTableCycleStable(FahrenheitMode::MSZ_A24NA, 59);
+}
+
+// The first and last rows of each table still map through the table in both
+// directions (the out-of-range check must not swallow them).
+static void expectEdgeRowsMap(FahrenheitMode mode, int low_f, float low_c, int high_f, float high_c) {
+    FahrenheitSupport fs;
+    fs.setUseFahrenheitSupportMode(mode);
+    EXPECT_FLOAT_EQ(fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(low_f)), low_c);
+    EXPECT_FLOAT_EQ(fs.normalizeUiTemperatureToHeatpumpTemperature(uiFromF(high_f)), high_c);
+    EXPECT_NEAR(fs.normalizeHeatpumpTemperatureToUiTemperature(low_c), uiFromF(low_f), 1e-4f);
+    EXPECT_NEAR(fs.normalizeHeatpumpTemperatureToUiTemperature(high_c), uiFromF(high_f), 1e-4f);
+}
+
+TEST(FahrenheitSupportTest, StandardTable_EdgeRowsMap) {
+    expectEdgeRowsMap(FahrenheitMode::STANDARD, 61, 16.0f, 88, 30.5f);
+}
+
+TEST(FahrenheitSupportTest, AltTable_EdgeRowsMap) {
+    expectEdgeRowsMap(FahrenheitMode::ALT, 61, 16.0f, 88, 31.0f);
+}
+
+TEST(FahrenheitSupportTest, MszA24naTable_EdgeRowsMap) {
+    expectEdgeRowsMap(FahrenheitMode::MSZ_A24NA, 59, 16.0f, 89, 31.0f);
+}

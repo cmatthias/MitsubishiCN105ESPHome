@@ -28,10 +28,17 @@ TEST(CalculateTempTest, EncodingA_ValidTemp_31_Max) {
     EXPECT_FLOAT_EQ(result, 31.0f);
 }
 
-TEST(CalculateTempTest, EncodingA_InvalidTemp_ReturnsFirstEntry) {
-    // 99 is NOT in TEMP_MAP → returns TEMP_MAP[0] = 31
+TEST(CalculateTempTest, EncodingA_AboveRange_ClampsTo31) {
     float result = HeatPumpProtocol::calculate_temperature_setting(99.0f, false);
-    EXPECT_FLOAT_EQ(result, static_cast<float>(TEMP_MAP[0]));
+    EXPECT_FLOAT_EQ(result, 31.0f);
+}
+
+TEST(CalculateTempTest, EncodingA_BelowRange_ClampsTo16) {
+    // Encoding A cannot represent < 16 °C; a low request must become 16, not
+    // fall back to TEMP_MAP[0] (31 °C).
+    EXPECT_FLOAT_EQ(HeatPumpProtocol::calculate_temperature_setting(13.0f, false), 16.0f);
+    EXPECT_FLOAT_EQ(HeatPumpProtocol::calculate_temperature_setting(10.0f, false), 16.0f);
+    EXPECT_FLOAT_EQ(HeatPumpProtocol::calculate_temperature_setting(15.5f, false), 16.0f);
 }
 
 TEST(CalculateTempTest, EncodingA_HalfDegree_RoundsToNearest) {
